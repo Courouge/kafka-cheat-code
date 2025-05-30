@@ -1,0 +1,2 @@
+# Dépendances pour les exemples Kafka Python
+kafka-python==2.0.2 
