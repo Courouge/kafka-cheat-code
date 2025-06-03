@@ -9,6 +9,7 @@ Ce guide représente une synthèse complète et actualisée de l'écosystème Ap
 - Confluent Platform et Cloud (confluent.io)
 - Conduktor Management Platform (conduktor.io)
 - Solutions SaaS émergentes (Redpanda, WarpStream, Aiven, etc.)
+- **[Synthèse Complète de la Littérature](./SYNTHESE_LITTERATURE_KAFKA.md)** - Vue 360° de toutes les sources
 
 **Dernière mise à jour :** Janvier 2025
 **Couverture :** Kafka 3.9+, Solutions Cloud 2024-2025
@@ -267,6 +268,19 @@ Multi-Cloud Strategy:
 
 ---
 
+## 📐 Standardisation et Qualité
+
+Cette documentation suit des **standards stricts** pour garantir cohérence et qualité :
+
+### [📐 Guide d'Harmonisation](./GUIDE_HARMONISATION.md)
+**Standards de structure, style et format**
+- Template standardisé de chapitres
+- Guidelines de code et exemples
+- Standards de références et citations
+- Checklist qualité et harmonisation
+
+---
+
 ## 🤝 Contribution et Feedback
 
 Cette documentation est un living document qui évolue avec l'écosystème Kafka. 
@@ -276,6 +290,12 @@ Cette documentation est un living document qui évolue avec l'écosystème Kafka
 - Proposer de nouveaux cas d'usage
 - Partager des retours d'expérience
 - Suggérer des améliorations
+
+**Standards de contribution :**
+- Respecter le [Guide d'Harmonisation](./GUIDE_HARMONISATION.md)
+- Citer les sources primaires
+- Fournir des exemples testables
+- Maintenir la neutralité technique
 
 **Contact et Community :**
 - Issues GitHub pour corrections
