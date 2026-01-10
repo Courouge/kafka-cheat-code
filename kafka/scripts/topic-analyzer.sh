@@ -3,8 +3,10 @@
 # Script d'analyse avancée des topics Kafka
 # Usage: ./topic-analyzer.sh [command] [topic-name]
 
-KAFKA_SERVER=${KAFKA_SERVER:-localhost:9092}
-KAFKA_LOGS=${KAFKA_LOGS:-/var/kafka-logs}
+set -e
+
+KAFKA_SERVER="${KAFKA_SERVER:-localhost:9092}"
+KAFKA_LOGS="${KAFKA_LOGS:-/var/kafka-logs}"
 
 # Couleurs
 RED='\033[0;31m'
@@ -19,8 +21,37 @@ log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 log_title() { echo -e "${BLUE}=== $1 ===${NC}"; }
-log_section() { echo -e "${CYAN}📊 $1${NC}"; }
-log_detail() { echo -e "${PURPLE}  ➤ $1${NC}"; }
+log_section() { echo -e "${CYAN}[SECTION]${NC} $1"; }
+log_detail() { echo -e "${PURPLE}  > $1${NC}"; }
+
+# Fonction portable pour obtenir la date de modification d'un fichier
+get_file_mtime() {
+    local file="$1"
+    if stat --version &>/dev/null 2>&1; then
+        # GNU stat (Linux)
+        stat -c '%y' "$file" 2>/dev/null
+    else
+        # BSD stat (macOS)
+        stat -f '%Sm' -t '%Y-%m-%d %H:%M:%S' "$file" 2>/dev/null
+    fi
+}
+
+# Vérifier les outils Kafka
+check_kafka_tools() {
+    if ! command -v kafka-topics &>/dev/null; then
+        log_error "kafka-topics command not found"
+        log_info "Make sure Kafka bin directory is in your PATH"
+        exit 1
+    fi
+}
+
+# Vérifier la connexion Kafka
+check_kafka_connection() {
+    if ! kafka-topics --list --bootstrap-server "$KAFKA_SERVER" &>/dev/null; then
+        log_error "Cannot connect to Kafka server at $KAFKA_SERVER"
+        exit 1
+    fi
+}
 
 show_help() {
     echo "Usage: $0 [command] [topic-name]"
@@ -87,10 +118,10 @@ analyze_segments() {
                     local segment_name=$(basename "$log_file")
                     local base_offset=$(echo "$segment_name" | sed 's/\.log$//')
                     
-                    echo "    📄 Segment: $segment_name"
+                    echo "    Segment: $segment_name"
                     echo "       Base offset: $base_offset"
                     echo "       Taille: $(du -h "$log_file" | cut -f1)"
-                    echo "       Modifié: $(stat -c %y "$log_file" 2>/dev/null || stat -f %Sm "$log_file")"
+                    echo "       Modifié: $(get_file_mtime "$log_file")"
                     
                     # Première et dernière entrée du segment
                     if command -v kafka-dump-log >/dev/null 2>&1; then
@@ -118,38 +149,47 @@ analyze_segments() {
 
 analyze_timestamps() {
     local topic=$1
-    
+
     if ! check_topic_exists "$topic"; then
         return 1
     fi
-    
+
     log_title "Analyse des timestamps pour le topic: $topic"
-    
+
     # Obtenir les premiers et derniers offsets
     log_section "Offsets et timestamps"
-    
-    local earliest_offsets=$(kafka-run-class kafka.tools.GetOffsetShell \
-        --broker-list "$KAFKA_SERVER" \
-        --topic "$topic" \
-        --time -2 2>/dev/null)
-    
-    local latest_offsets=$(kafka-run-class kafka.tools.GetOffsetShell \
-        --broker-list "$KAFKA_SERVER" \
-        --topic "$topic" \
-        --time -1 2>/dev/null)
-    
+
+    # Utiliser kafka-get-offsets si disponible, sinon GetOffsetShell
+    local earliest_offsets
+    local latest_offsets
+
+    if command -v kafka-get-offsets &>/dev/null; then
+        earliest_offsets=$(kafka-get-offsets --bootstrap-server "$KAFKA_SERVER" --topic "$topic" --time -2 2>/dev/null)
+        latest_offsets=$(kafka-get-offsets --bootstrap-server "$KAFKA_SERVER" --topic "$topic" --time -1 2>/dev/null)
+    else
+        earliest_offsets=$(kafka-run-class kafka.tools.GetOffsetShell \
+            --broker-list "$KAFKA_SERVER" \
+            --topic "$topic" \
+            --time -2 2>/dev/null)
+
+        latest_offsets=$(kafka-run-class kafka.tools.GetOffsetShell \
+            --broker-list "$KAFKA_SERVER" \
+            --topic "$topic" \
+            --time -1 2>/dev/null)
+    fi
+
     echo "$earliest_offsets" | while read line; do
         if [ -n "$line" ]; then
             local partition=$(echo "$line" | cut -d: -f2)
             local earliest_offset=$(echo "$line" | cut -d: -f3)
             local latest_line=$(echo "$latest_offsets" | grep ":$partition:")
             local latest_offset=$(echo "$latest_line" | cut -d: -f3)
-            
+
             log_detail "Partition $partition:"
             echo "    Premier offset: $earliest_offset"
             echo "    Dernier offset: $latest_offset"
             echo "    Nombre de messages: $((latest_offset - earliest_offset))"
-            
+
             # Essayer d'obtenir le timestamp du premier message
             if [ "$earliest_offset" != "$latest_offset" ]; then
                 local first_timestamp=$(kafka-console-consumer \
@@ -160,9 +200,16 @@ analyze_timestamps() {
                     --bootstrap-server "$KAFKA_SERVER" \
                     --property print.timestamp=true \
                     --timeout-ms 5000 2>/dev/null | head -n1 | cut -d$'\t' -f1)
-                
+
                 if [ -n "$first_timestamp" ] && [ "$first_timestamp" != "null" ]; then
-                    local readable_time=$(date -d "@$(echo "$first_timestamp" | sed 's/CreateTime://' | cut -c1-10)" 2>/dev/null || echo "Format non supporté")
+                    # Conversion portable du timestamp
+                    local ts_seconds=$(echo "$first_timestamp" | sed 's/CreateTime://' | cut -c1-10)
+                    local readable_time
+                    if date --version &>/dev/null 2>&1; then
+                        readable_time=$(date -d "@$ts_seconds" 2>/dev/null || echo "N/A")
+                    else
+                        readable_time=$(date -r "$ts_seconds" 2>/dev/null || echo "N/A")
+                    fi
                     echo "    Premier timestamp: $first_timestamp ($readable_time)"
                 fi
             fi
@@ -173,39 +220,48 @@ analyze_timestamps() {
 
 analyze_offsets() {
     local topic=$1
-    
+
     if ! check_topic_exists "$topic"; then
         return 1
     fi
-    
+
     log_title "Analyse des offsets pour le topic: $topic"
-    
+
     # Informations de base sur les offsets
     log_section "Informations sur les offsets"
-    
-    kafka-run-class kafka.tools.GetOffsetShell \
-        --broker-list "$KAFKA_SERVER" \
-        --topic "$topic" \
-        --time -2 > /tmp/earliest_offsets.txt 2>/dev/null
-    
-    kafka-run-class kafka.tools.GetOffsetShell \
-        --broker-list "$KAFKA_SERVER" \
-        --topic "$topic" \
-        --time -1 > /tmp/latest_offsets.txt 2>/dev/null
-    
-    paste /tmp/earliest_offsets.txt /tmp/latest_offsets.txt | while read earliest latest; do
+
+    local tmp_earliest="/tmp/earliest_offsets_$$.txt"
+    local tmp_latest="/tmp/latest_offsets_$$.txt"
+
+    # Utiliser kafka-get-offsets si disponible
+    if command -v kafka-get-offsets &>/dev/null; then
+        kafka-get-offsets --bootstrap-server "$KAFKA_SERVER" --topic "$topic" --time -2 > "$tmp_earliest" 2>/dev/null
+        kafka-get-offsets --bootstrap-server "$KAFKA_SERVER" --topic "$topic" --time -1 > "$tmp_latest" 2>/dev/null
+    else
+        kafka-run-class kafka.tools.GetOffsetShell \
+            --broker-list "$KAFKA_SERVER" \
+            --topic "$topic" \
+            --time -2 > "$tmp_earliest" 2>/dev/null
+
+        kafka-run-class kafka.tools.GetOffsetShell \
+            --broker-list "$KAFKA_SERVER" \
+            --topic "$topic" \
+            --time -1 > "$tmp_latest" 2>/dev/null
+    fi
+
+    paste "$tmp_earliest" "$tmp_latest" | while read earliest latest; do
         if [ -n "$earliest" ] && [ -n "$latest" ]; then
             local partition_e=$(echo "$earliest" | cut -d: -f2)
             local offset_e=$(echo "$earliest" | cut -d: -f3)
             local offset_l=$(echo "$latest" | cut -d: -f3)
-            
+
             log_detail "Partition $partition_e:"
-            echo "    Range: $offset_e → $offset_l"
+            echo "    Range: $offset_e -> $offset_l"
             echo "    Messages: $((offset_l - offset_e))"
         fi
     done
-    
-    rm -f /tmp/earliest_offsets.txt /tmp/latest_offsets.txt
+
+    rm -f "$tmp_earliest" "$tmp_latest"
     
     # Groupes de consommateurs sur ce topic
     log_section "Groupes de consommateurs actifs"
@@ -361,8 +417,16 @@ compare_topics() {
             
             # Compter les messages
             local total_messages=0
-            local earliest=$(kafka-run-class kafka.tools.GetOffsetShell --broker-list "$KAFKA_SERVER" --topic "$topic" --time -2 2>/dev/null)
-            local latest=$(kafka-run-class kafka.tools.GetOffsetShell --broker-list "$KAFKA_SERVER" --topic "$topic" --time -1 2>/dev/null)
+            local earliest
+            local latest
+
+            if command -v kafka-get-offsets &>/dev/null; then
+                earliest=$(kafka-get-offsets --bootstrap-server "$KAFKA_SERVER" --topic "$topic" --time -2 2>/dev/null)
+                latest=$(kafka-get-offsets --bootstrap-server "$KAFKA_SERVER" --topic "$topic" --time -1 2>/dev/null)
+            else
+                earliest=$(kafka-run-class kafka.tools.GetOffsetShell --broker-list "$KAFKA_SERVER" --topic "$topic" --time -2 2>/dev/null)
+                latest=$(kafka-run-class kafka.tools.GetOffsetShell --broker-list "$KAFKA_SERVER" --topic "$topic" --time -1 2>/dev/null)
+            fi
             
             while read line; do
                 if [ -n "$line" ]; then
@@ -403,65 +467,85 @@ compare_topics() {
 }
 
 # Main function
-case "$1" in
-    segments)
-        if [ -z "$2" ]; then
-            log_error "Nom du topic requis"
+main() {
+    case "$1" in
+        segments)
+            if [ -z "$2" ]; then
+                log_error "Nom du topic requis"
+                show_help
+                exit 1
+            fi
+            check_kafka_tools
+            analyze_segments "$2"
+            ;;
+        timestamps)
+            if [ -z "$2" ]; then
+                log_error "Nom du topic requis"
+                show_help
+                exit 1
+            fi
+            check_kafka_tools
+            check_kafka_connection
+            analyze_timestamps "$2"
+            ;;
+        offsets)
+            if [ -z "$2" ]; then
+                log_error "Nom du topic requis"
+                show_help
+                exit 1
+            fi
+            check_kafka_tools
+            check_kafka_connection
+            analyze_offsets "$2"
+            ;;
+        size)
+            if [ -z "$2" ]; then
+                log_error "Nom du topic requis"
+                show_help
+                exit 1
+            fi
+            check_kafka_tools
+            check_kafka_connection
+            analyze_size "$2"
+            ;;
+        health)
+            if [ -z "$2" ]; then
+                log_error "Nom du topic requis"
+                show_help
+                exit 1
+            fi
+            check_kafka_tools
+            check_kafka_connection
+            check_health "$2"
+            ;;
+        full)
+            if [ -z "$2" ]; then
+                log_error "Nom du topic requis"
+                show_help
+                exit 1
+            fi
+            check_kafka_tools
+            check_kafka_connection
+            full_analysis "$2"
+            ;;
+        compare)
+            check_kafka_tools
+            check_kafka_connection
+            shift
+            compare_topics "$@"
+            ;;
+        -h|--help|help)
+            show_help
+            ;;
+        "")
+            show_help
+            ;;
+        *)
+            log_error "Commande inconnue: $1"
             show_help
             exit 1
-        fi
-        analyze_segments "$2"
-        ;;
-    timestamps)
-        if [ -z "$2" ]; then
-            log_error "Nom du topic requis"
-            show_help
-            exit 1
-        fi
-        analyze_timestamps "$2"
-        ;;
-    offsets)
-        if [ -z "$2" ]; then
-            log_error "Nom du topic requis"
-            show_help
-            exit 1
-        fi
-        analyze_offsets "$2"
-        ;;
-    size)
-        if [ -z "$2" ]; then
-            log_error "Nom du topic requis"
-            show_help
-            exit 1
-        fi
-        analyze_size "$2"
-        ;;
-    health)
-        if [ -z "$2" ]; then
-            log_error "Nom du topic requis"
-            show_help
-            exit 1
-        fi
-        check_health "$2"
-        ;;
-    full)
-        if [ -z "$2" ]; then
-            log_error "Nom du topic requis"
-            show_help
-            exit 1
-        fi
-        full_analysis "$2"
-        ;;
-    compare)
-        shift
-        compare_topics "$@"
-        ;;
-    -h|--help|help)
-        show_help
-        ;;
-    *)
-        log_error "Commande inconnue: $1"
-        show_help
-        exit 1
-        ;;
-esac 
+            ;;
+    esac
+}
+
+main "$@" 

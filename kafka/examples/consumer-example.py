@@ -1,32 +1,52 @@
 #!/usr/bin/env python3
 """
 Exemple de consommateur Kafka avec configuration simplifiée
+
+Usage:
+    python consumer-example.py
+
+Variables d'environnement:
+    KAFKA_BOOTSTRAP_SERVERS: Serveurs Kafka (défaut: localhost:9092)
 """
 
 import json
+import os
 import signal
 import sys
 from datetime import datetime
-from kafka import KafkaConsumer
-from kafka.errors import KafkaError
+
+try:
+    from kafka import KafkaConsumer
+    from kafka.errors import KafkaError
+except ImportError:
+    print("Erreur: kafka-python n'est pas installé.")
+    print("Installez-le avec: pip install kafka-python")
+    sys.exit(1)
+
+# Configuration par défaut depuis les variables d'environnement
+DEFAULT_BOOTSTRAP_SERVERS = os.environ.get('KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092')
+
 
 class SimpleKafkaConsumer:
-    def __init__(self, topics, group_id='default-group', bootstrap_servers='localhost:9092', **kwargs):
+    def __init__(self, topics, group_id='default-group', bootstrap_servers=None, **kwargs):
         """
         Initialise le consommateur Kafka avec une configuration simplifiée
-        
+
         Args:
             topics: Topic(s) à consommer (string ou liste)
             group_id: ID du groupe de consommateurs
-            bootstrap_servers: Liste des serveurs Kafka
+            bootstrap_servers: Liste des serveurs Kafka (défaut: $KAFKA_BOOTSTRAP_SERVERS ou localhost:9092)
             **kwargs: Paramètres additionnels pour le consommateur
         """
         if isinstance(topics, str):
             topics = [topics]
-        
+
+        if bootstrap_servers is None:
+            bootstrap_servers = DEFAULT_BOOTSTRAP_SERVERS
+
         self.topics = topics
         self.running = True
-        
+
         default_config = {
             'bootstrap_servers': bootstrap_servers,
             'group_id': group_id,
@@ -170,9 +190,20 @@ class SimpleKafkaConsumer:
 
     def close(self):
         """Ferme proprement le consommateur"""
-        if hasattr(self, 'consumer'):
+        if hasattr(self, 'consumer') and self.consumer:
             self.consumer.close()
-            print("🔒 Consommateur fermé")
+            self.consumer = None
+            print("[OK] Consommateur ferme")
+
+    def __enter__(self):
+        """Support du context manager (with statement)"""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Fermeture automatique avec le context manager"""
+        self.close()
+        return False
+
 
 def custom_message_handler(message):
     """Exemple de handler personnalisé"""

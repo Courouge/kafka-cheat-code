@@ -1,23 +1,44 @@
 #!/usr/bin/env python3
 """
 Exemple de producteur Kafka avec configuration simplifiée
+
+Usage:
+    python producer-example.py
+
+Variables d'environnement:
+    KAFKA_BOOTSTRAP_SERVERS: Serveurs Kafka (défaut: localhost:9092)
 """
 
 import json
+import os
+import sys
 import time
 from datetime import datetime
-from kafka import KafkaProducer
-from kafka.errors import KafkaError
+
+try:
+    from kafka import KafkaProducer
+    from kafka.errors import KafkaError
+except ImportError:
+    print("Erreur: kafka-python n'est pas installé.")
+    print("Installez-le avec: pip install kafka-python")
+    sys.exit(1)
+
+# Configuration par défaut depuis les variables d'environnement
+DEFAULT_BOOTSTRAP_SERVERS = os.environ.get('KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092')
+
 
 class SimpleKafkaProducer:
-    def __init__(self, bootstrap_servers='localhost:9092', **kwargs):
+    def __init__(self, bootstrap_servers=None, **kwargs):
         """
         Initialise le producteur Kafka avec une configuration simplifiée
-        
+
         Args:
-            bootstrap_servers: Liste des serveurs Kafka
+            bootstrap_servers: Liste des serveurs Kafka (défaut: $KAFKA_BOOTSTRAP_SERVERS ou localhost:9092)
             **kwargs: Paramètres additionnels pour le producteur
         """
+        if bootstrap_servers is None:
+            bootstrap_servers = DEFAULT_BOOTSTRAP_SERVERS
+
         default_config = {
             'bootstrap_servers': bootstrap_servers,
             'key_serializer': lambda k: k.encode('utf-8') if k else None,
@@ -104,10 +125,21 @@ class SimpleKafkaProducer:
 
     def close(self):
         """Ferme proprement le producteur"""
-        if hasattr(self, 'producer'):
+        if hasattr(self, 'producer') and self.producer:
             self.producer.flush()  # S'assurer que tous les messages sont envoyés
             self.producer.close()
-            print("🔒 Producteur fermé")
+            self.producer = None
+            print("[OK] Producteur ferme")
+
+    def __enter__(self):
+        """Support du context manager (with statement)"""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Fermeture automatique avec le context manager"""
+        self.close()
+        return False
+
 
 def example_simple_messages():
     """Exemple d'envoi de messages simples"""

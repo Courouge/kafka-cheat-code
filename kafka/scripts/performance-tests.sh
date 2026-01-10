@@ -3,9 +3,15 @@
 # Script de tests de performance Kafka
 # Usage: ./performance-tests.sh [producer|consumer|full] [topic-name]
 
-KAFKA_SERVER=${KAFKA_SERVER:-localhost:9092}
-TOPIC=${2:-perf-test-topic}
-TEST_TYPE=${1:-full}
+set -e
+
+KAFKA_SERVER="${KAFKA_SERVER:-localhost:9092}"
+TOPIC="${2:-perf-test-topic}"
+TEST_TYPE="${1:-full}"
+
+# Configuration par défaut des tests
+NUM_RECORDS="${NUM_RECORDS:-100000}"
+RECORD_SIZE="${RECORD_SIZE:-1000}"
 
 # Couleurs
 RED='\033[0;31m'
@@ -19,26 +25,59 @@ log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 log_title() { echo -e "${BLUE}=== $1 ===${NC}"; }
-log_test() { echo -e "${CYAN}🧪 $1${NC}"; }
+log_test() { echo -e "${CYAN}[TEST]${NC} $1"; }
+
+# Vérifier les outils Kafka
+check_kafka_tools() {
+    local missing=()
+
+    for tool in kafka-topics kafka-producer-perf-test kafka-consumer-perf-test; do
+        if ! command -v "$tool" &>/dev/null; then
+            missing+=("$tool")
+        fi
+    done
+
+    if [ ${#missing[@]} -gt 0 ]; then
+        log_error "Outils Kafka manquants: ${missing[*]}"
+        log_info "Assurez-vous que le répertoire bin de Kafka est dans votre PATH"
+        exit 1
+    fi
+}
+
+# Vérifier la connexion Kafka
+check_kafka_connection() {
+    log_info "Vérification de la connexion à Kafka..."
+    if ! kafka-topics --list --bootstrap-server "$KAFKA_SERVER" &>/dev/null; then
+        log_error "Impossible de se connecter à Kafka sur $KAFKA_SERVER"
+        log_info "Assurez-vous que Kafka est en cours d'exécution"
+        exit 1
+    fi
+    log_info "Connexion à Kafka réussie"
+}
 
 show_help() {
     echo "Usage: $0 [test-type] [topic-name]"
     echo ""
     echo "Types de test:"
-    echo "  producer  - Tests de performance producteur uniquement"
-    echo "  consumer  - Tests de performance consommateur uniquement"
-    echo "  full      - Tests complets (défaut)"
-    echo "  latency   - Tests de latence"
-    echo "  batch     - Tests de batch.size et linger.ms"
+    echo "  producer    - Tests de performance producteur uniquement"
+    echo "  consumer    - Tests de performance consommateur uniquement"
+    echo "  full        - Tests complets (défaut)"
+    echo "  latency     - Tests de latence"
+    echo "  batch       - Tests de batch.size et linger.ms"
     echo "  compression - Tests de compression"
+    echo "  cleanup     - Nettoyer les topics de test"
     echo ""
     echo "Variables d'environnement:"
-    echo "  KAFKA_SERVER - Serveur Kafka (défaut: localhost:9092)"
+    echo "  KAFKA_SERVER  - Serveur Kafka (défaut: localhost:9092)"
+    echo "  NUM_RECORDS   - Nombre de messages à envoyer (défaut: 100000)"
+    echo "  RECORD_SIZE   - Taille des messages en bytes (défaut: 1000)"
     echo ""
     echo "Exemples:"
     echo "  $0 producer my-test-topic"
     echo "  $0 full"
     echo "  $0 batch test-batching"
+    echo "  NUM_RECORDS=50000 $0 producer my-topic"
+    echo "  $0 cleanup"
 }
 
 create_test_topic() {
@@ -332,14 +371,35 @@ run_tests() {
 }
 
 # Point d'entrée
-log_title "Tests de performance Kafka"
-log_info "Type de test: $TEST_TYPE"
-log_info "Topic de base: $TOPIC"
-log_info "Serveur Kafka: $KAFKA_SERVER"
-echo ""
+main() {
+    # Afficher l'aide si demandé
+    if [ "$TEST_TYPE" = "-h" ] || [ "$TEST_TYPE" = "--help" ] || [ "$TEST_TYPE" = "help" ]; then
+        show_help
+        exit 0
+    fi
 
-run_tests
+    log_title "Tests de performance Kafka"
+    log_info "Type de test: $TEST_TYPE"
+    log_info "Topic de base: $TOPIC"
+    log_info "Serveur Kafka: $KAFKA_SERVER"
+    log_info "Nombre de messages: $NUM_RECORDS"
+    log_info "Taille des messages: $RECORD_SIZE bytes"
+    echo ""
 
-echo ""
-log_title "Tests terminés"
-log_info "Pour nettoyer les topics de test: $0 cleanup" 
+    # Vérifications préalables (sauf pour help et cleanup)
+    if [ "$TEST_TYPE" != "cleanup" ]; then
+        check_kafka_tools
+        check_kafka_connection
+        echo ""
+    fi
+
+    run_tests
+
+    echo ""
+    log_title "Tests terminés"
+    if [ "$TEST_TYPE" != "cleanup" ]; then
+        log_info "Pour nettoyer les topics de test: $0 cleanup"
+    fi
+}
+
+main 
