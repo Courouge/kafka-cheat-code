@@ -5,6 +5,7 @@ Un guide pratique et simplifié pour toutes les commandes Kafka essentielles ave
 ## 📋 Table des matières
 
 - [Installation rapide](#installation-rapide)
+- [Commandes Make (Recommandé)](#-commandes-make-recommandé)
 - [Configurations](#configurations)
 - [Scripts utiles](#scripts-utiles)
 - [Exemples de code](#exemples-de-code)
@@ -31,24 +32,103 @@ bin/zookeeper-server-start.sh config/zookeeper.properties
 bin/kafka-server-start.sh config/server.properties
 ```
 
+## 🎮 Commandes Make (Recommandé)
+
+Le projet inclut un **Makefile** qui simplifie toutes les opérations. C'est la méthode recommandée pour utiliser ce projet.
+
+```bash
+# Afficher toutes les commandes disponibles
+make help
+```
+
+### Installation et vérification
+```bash
+make install          # Installer les dépendances Python
+make check            # Vérifier les prérequis (Java, Kafka, Python)
+```
+
+### Gestion des services Kafka
+```bash
+make start            # Démarrer Zookeeper et Kafka
+make stop             # Arrêter les services
+make restart          # Redémarrer les services
+make status           # Afficher le statut
+make logs             # Afficher les logs Kafka
+```
+
+### Gestion des topics
+```bash
+make topic-list                              # Lister tous les topics
+make topic-create TOPIC=mon-topic            # Créer un topic (3 partitions par défaut)
+make topic-create TOPIC=mon-topic PARTITIONS=6 REPLICATION=2
+make topic-describe TOPIC=mon-topic          # Décrire un topic
+make topic-delete TOPIC=mon-topic            # Supprimer un topic
+```
+
+### Consumer Groups
+```bash
+make groups                                  # Lister les groupes
+make group GROUP=mon-groupe                  # Décrire un groupe
+make reset TOPIC=mon-topic GROUP=mon-groupe  # Reset offsets (earliest par défaut)
+make reset TOPIC=mon-topic GROUP=mon-groupe TO=latest
+```
+
+### Tests de performance
+```bash
+make test-producer                   # Test producteur
+make test-consumer                   # Test consommateur
+make test-full                       # Tests complets
+make test-batch                      # Tests de batching
+make test-compression                # Tests de compression
+make test-cleanup                    # Nettoyer les topics de test
+```
+
+### Analyse des topics
+```bash
+make analyze-full TOPIC=mon-topic    # Analyse complète
+make analyze-health TOPIC=mon-topic  # Vérifier la santé
+make analyze-offsets TOPIC=mon-topic # Analyser les offsets
+make analyze-size TOPIC=mon-topic    # Calculer la taille
+```
+
+### Exemples Python
+```bash
+make producer         # Lancer l'exemple producteur
+make consumer         # Lancer l'exemple consommateur
+```
+
+### Nettoyage
+```bash
+make clean            # Supprimer les fichiers temporaires Python
+```
+
+### Variables d'environnement
+```bash
+# Personnaliser les chemins et serveurs
+KAFKA_HOME=/opt/kafka make start
+KAFKA_SERVER=broker1:9092 make topic-list
+```
+
 ## 📁 Structure du projet
 
 ```
-kafka/
-├── configs/           # Configurations simplifiées
-│   ├── local.properties      # Configuration locale
-│   ├── producer.properties   # Configuration producteur
-│   ├── consumer.properties   # Configuration consommateur
-│   ├── admin.plain.properties # SASL PLAIN
-│   └── admin.scram.properties # SASL SCRAM
-├── scripts/          # Scripts utiles
-│   ├── quick-start.sh        # Démarrage/arrêt Kafka
-│   ├── topic-manager.sh      # Gestion des topics
-│   ├── performance-tests.sh  # Tests de performance
-│   └── topic-analyzer.sh     # Analyse avancée des topics
-└── examples/         # Exemples d'utilisation
-    ├── producer-example.py   # Producteur Python
-    └── consumer-example.py   # Consommateur Python
+├── Makefile              # Interface simplifiée (make help)
+├── requirements.txt      # Dépendances Python
+└── kafka/
+    ├── configs/          # Configurations simplifiées
+    │   ├── local.properties      # Configuration locale
+    │   ├── producer.properties   # Configuration producteur
+    │   ├── consumer.properties   # Configuration consommateur
+    │   ├── admin.plain.properties # SASL PLAIN
+    │   └── admin.scram.properties # SASL SCRAM
+    ├── scripts/          # Scripts utiles
+    │   ├── quick-start.sh        # Démarrage/arrêt Kafka
+    │   ├── topic-manager.sh      # Gestion des topics
+    │   ├── performance-tests.sh  # Tests de performance
+    │   └── topic-analyzer.sh     # Analyse avancée des topics
+    └── examples/         # Exemples d'utilisation
+        ├── producer-example.py   # Producteur Python
+        └── consumer-example.py   # Consommateur Python
 ```
 
 ## 🎯 Objectif
